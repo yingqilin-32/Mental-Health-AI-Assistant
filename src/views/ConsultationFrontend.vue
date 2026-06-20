@@ -209,10 +209,10 @@ const sendMessage = () => {
         message.value.push({
             id: `Date.now()`,
             senderType: 1,
-            content: messageText.value.trim(),
+            content,
             createdAt: new Date().toLocaleString(),
         })
-        startAiResponse(currentSession.value.sessionid, messageText.value.trim());
+        startAiResponse(currentSession.value.id || currentSession.value.sessionid, content);
     }
 }
 
@@ -277,11 +277,12 @@ const startAiResponse = (sessionid,userMessage) => {
 
     //invoke the API to get the AI response
     const controller = new AbortController();//To cut off the request when the page is closed
-    fetchEventSource('/api/psychological-chat/stream',{
+    let receivedResponse = false;
+    void fetchEventSource('/api/psychological-chat/stream',{
         method: 'POST',
         headers:{
             'Content-Type': 'application/json',
-            'Token': localStorage.getItem('token'),
+            ...(localStorage.getItem('token') ? { token: localStorage.getItem('token') } : {}),
             'Accept': 'text/event-stream'
         },
         body: JSON.stringify({
@@ -290,48 +291,99 @@ const startAiResponse = (sessionid,userMessage) => {
             userMessage
         }),
         signal: controller.signal,
-        onopen: (response) => {
+        onopen: async (response) => {
             console.log(response);
-            if(response.headers.get('Content-Type') !== 'text/event-stream'){
-                ElMessage.error('Sever replies non-event-stream data, please try again.');
+            if (!response.ok) {
+                let errorMessage = `AI service returned HTTP ${response.status}.`;
+                try {
+                    const body = await response.clone().json();
+                    errorMessage = body.message || body.msg || errorMessage;
+                } catch {
+                    // The response did not contain a JSON error body.
+                }
+                throw new Error(errorMessage);
+            }
+            if (!response.headers.get('Content-Type')?.includes('text/event-stream')) {
+                throw new Error('AI service returned an unexpected response format.');
             }
         },
         onmessage: (event) => {
-            const raw=even.data.trim();
+            const raw = event.data.trim();
             if(!raw)return;
-            const evenName = event.event
+            const eventName = event.event;
             // fetch current session AI message
-            const aiMessage = message.value(message.value.length - 1);
+            const aiMessage = message.value[message.value.length - 1];
 
-            if(evenName === 'done'){
+            if (eventName === 'done' || raw === '[DONE]') {
                 isAiTyping.value = false;
-                ctrl.abort();
+                controller.abort();
                 return;
             }
-            const payload = JSON.parse(raw);
-            const ok = String(payload.code)==='200' 
-            if(ok && payload.data && payload.data.content){
-                aiMessage.content += payload.data.content;
-            }else if (!ok){
-                // error
-                processErrorMessage(payload.message || 'An error occurred while processing your request.');
+            let payload;
+            try {
+                payload = JSON.parse(raw);
+            } catch {
+                // Some SSE backends send plain text chunks rather than JSON.
+                if (aiMessage) {
+                    aiMessage.content += raw;
+                    receivedResponse = true;
+                }
+                return;
+            }
+            const statusCode = payload?.code ?? payload?.status ?? payload?.statusCode;
+            const isSuccess = statusCode === undefined || ['0', '200'].includes(String(statusCode));
+
+            if (!isSuccess) {
+                processErrorMessage(payload?.message || payload?.msg || 'The AI service rejected this request.');
+                controller.abort();
+                return;
+            }
+
+            const chunk = typeof payload === 'string'
+                ? payload
+                : payload?.data?.content
+                    ?? payload?.data?.text
+                    ?? payload?.data?.delta
+                    ?? payload?.content
+                    ?? payload?.text
+                    ?? payload?.delta
+                    ?? (typeof payload?.data === 'string' ? payload.data : null);
+
+            if (chunk !== null && chunk !== undefined && aiMessage) {
+                aiMessage.content += String(chunk);
+                receivedResponse = true;
+            } else {
+                // Keep metadata-only events from being displayed as errors.
+                console.debug('Ignoring SSE event without a text chunk:', payload);
             }
         },
         onerror: (error) => {
             processErrorMessage(error.message || 'An error occurred while processing your request.');
+            controller.abort();
+            throw error;
         },
         onclose: () => {
-            isAiTyping.value = false;
+            if (isAiTyping.value && !receivedResponse && !aiMessage.content) {
+                processErrorMessage('The AI service closed the connection before sending a response.');
+            } else {
+                isAiTyping.value = false;
+            }
             // start analyzing emotion
         }
-    })
+    }).catch((error) => {
+        if (error?.name !== 'AbortError') {
+            console.error('AI response stream failed:', error);
+        }
+    });
     };
 
 //Function of Proccessing the error message
 const processErrorMessage = (error) => {
     // fetch current session AI message
-    const aiMessage = message.value(message.value.length - 1);
-    const errorText = error || 'An error occurred while processing your request.';
+    const aiMessage = message.value[message.value.length - 1];
+    const errorText = typeof error === 'string'
+        ? error
+        : error?.message || 'Unable to connect to the AI service. Please try again later.';
 
     if (aiMessage) {
         aiMessage.content = errorText;
