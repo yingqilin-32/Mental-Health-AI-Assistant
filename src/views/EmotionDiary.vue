@@ -1,0 +1,3 @@
+<template>
+    Emotion Diary
+</template>

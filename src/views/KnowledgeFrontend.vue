@@ -1,0 +1,3 @@
+<template>
+    Knowledge Frontend
+</template>
