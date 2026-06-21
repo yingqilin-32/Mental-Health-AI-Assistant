@@ -24,3 +24,7 @@ export const getSessionDetail = (sessionId) => {
 export const addEmotionDiary = (data) => {
     return apiClient.post('/emotion-diary', data);
 }
+
+export const getKnowledgeList = (params) => {
+    return apiClient.get('/knowledge/article/page', { params });
+}
