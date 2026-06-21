@@ -8,8 +8,8 @@
                 </h2>
                 <p class="discription">Every late night, every moment of anxiety, we are here. You don't have to face it alone. Let the connection between hearts bring warmth to every day of your life.</p>
                 <div class="hero-actions">
-                    <el-button class="btn-solid" size="large">Speak your heart</el-button>
-                    <el-button class="btn-outline" size="large">Record mood</el-button>
+                    <el-button class="btn-solid" size="large" @click="$router.push('/consultation')">Speak your heart</el-button>
+                    <el-button class="btn-outline" size="large" @click="$router.push('/emotion-diary')">Record mood</el-button>
                 </div>
             </div>
             <div class="robot">
