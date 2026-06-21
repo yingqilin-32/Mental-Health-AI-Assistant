@@ -20,3 +20,7 @@ export const deleteSession = (sessionId) => {
 export const getSessionDetail = (sessionId) => {
     return apiClient.get(`/psychological-chat/sessions/${sessionId}/messages`);
 }
+
+export const addEmotionDiary = (data) => {
+    return apiClient.post('/emotion-diary', data);
+}
